@@ -1,0 +1,108 @@
+---
+title: "Evaluating Barbell Lift Technique"
+author: "Katherine Vance"
+date: "6/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(caret)
+```
+
+## Executive Summary
+
+In this report, I use data from the Weight Lifting Exercises dataset to predict in which manner a barbell lift was performed.  I fit three models using most of the training data.  After testing all three models on the remaining data, I selected the best-performing of the three, which is a random forest model.  This random forest model predicts the manner of in which the barbell lift was performed with over 99% accuracy.
+
+## Cleaning the Data
+
+The Weight Lifting Exercises training dataset contains 19622 observations of 160 variables.  Seven of the variables contain metadata about the observation, and one is the outcome variable (classe).  Most of the variables contained no observation data for all or almost all of the observations.  I removed the metadata variables and the variables that had no observation data.  This left 52 numeric predictor variables plus the outcome variable. 
+
+```{r cleaning, cache=TRUE}
+# Loading in the data
+pml_training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+
+# Cleaning the data by removing non-predictor variables, classifying variables appropriately, and removing variables with many missing values
+clean_pml_training <- pml_training[,8:160]
+clean_pml_training <- apply(clean_pml_training[,1:152], 2, as.numeric)
+NApercent <- apply(clean_pml_training[,1:152], 2, function(x) sum(is.na(x))/length(x))
+clean_pml_training <- clean_pml_training[,NApercent < .5]
+clean_pml_training <- cbind.data.frame(clean_pml_training, classe=pml_training$classe)
+```
+
+## Model Building
+
+I partitioned the clean dataset into a training set containing approximately 80% of the observations and a testing/validation set (VAULT) containing the remaining observations.
+
+```{r trainingvault, cache=TRUE}
+## Creating a training set and a data VAULT for testing at the end
+set.seed(1618)
+inTrain = createDataPartition(clean_pml_training$classe, p = 4/5)[[1]]
+training = clean_pml_training[ inTrain,]
+VAULT = clean_pml_training[-inTrain,]
+```
+
+Using the training set, I fit random forest, linear discriminant analysis, and k-nearest neighbor models, all using 10-fold cross validation.  The train function in the caret package can use the trainControl function to perform cross validation, so that is what I did.  I chose these three model types because I wanted to consider three very different types of classification models to see which would perform the best. 
+
+```{r models, cache=TRUE}
+# random forest model
+rfModel <- train(
+  classe ~ ., 
+  training,
+  method = "rf",
+  trControl = trainControl(
+    method = "cv", 
+    number = 10,
+    verboseIter = TRUE
+  )
+)
+
+# linear discriminant analysis model
+ldaModel <- train(
+  classe ~ ., 
+  training,
+  method = "lda",
+  trControl = trainControl(
+    method = "cv", 
+    number = 10,
+    verboseIter = TRUE
+  )
+)
+
+# k nearest neighbors model
+knnModel <- train(
+  classe ~ ., 
+  training,
+  method = "knn",
+  preProcess = c("center", "scale"),
+  tuneLength = 20,
+  trControl = trainControl(
+    method = "cv", 
+    number = 10,
+    verboseIter = TRUE
+  )
+)
+```
+
+## Model Selection
+
+For each of my three models, I predicted classe for each observation in the testing/validation VAULT.  I used the confusionMatrix function in the caret package to assess the accuracy of each model on the testing set.
+
+```{r testing, cache=TRUE}
+rfPredictions <- predict(rfModel, newdata = VAULT)
+confusionMatrix(rfPredictions, VAULT$classe)
+
+ldaPredictions <- predict(ldaModel, newdata = VAULT)
+confusionMatrix(ldaPredictions, VAULT$classe)
+
+knnPredictions <- predict(knnModel, newdata = VAULT)
+confusionMatrix(knnPredictions, VAULT$classe)
+```
+
+The random forest model was 99.41% accurate on the testing VAULT, the linear discriminant analysis model was 69.36% accurate, and the k nearest neighbors model was 97.25% accurate.  Since the random forest model performed the best on the testing VAULT, I will use that model to predict classe.
+
+## Expected Out-of-Sample Error
+
+Because I held out about 20% of the data in the training set when building the model, I expect that the random forest model's accuracy on the testing/validation VAULT data is a good estimate of its accuracy.  The confusionMatrix function gave a 95% confidence interval of 0.9912 to 0.9963 for the model's accuracy.  Therefore I expect that the out-of-sample error rate for my random forest model is between 0.0088 and 0.0037.  
